@@ -33,26 +33,44 @@
       <button
         type="button"
         class="task-button-secondary"
-        :disabled="locating"
-        @click="captureLocation"
+        :disabled="loadingLocation"
+        @click="handleGetLocation"
       >
-        {{ locating ? 'Buscando localização...' : 'Adicionar localização' }}
+        {{ loadingLocation ? 'Buscando localização...' : 'Usar localização atual' }}
       </button>
-      <span
-        v-if="latitude !== null && longitude !== null"
-        class="location-status"
-      >
-        Localização adicionada
-      </span>
+
+      <template v-if="location">
+        <span class="location-status">
+          {{ location.latitude.toFixed(4) }}, {{ location.longitude.toFixed(4) }}
+        </span>
+        <span
+          v-if="accuracyLevel"
+          :class="`accuracy-badge accuracy-badge--${accuracyLevel}`"
+        >
+          Precisão {{ accuracyLevel }}
+        </span>
+        <span v-if="location.label" class="location-label">{{ location.label }}</span>
+
+        <label class="approximate-toggle">
+          <input type="checkbox" v-model="useApproximateLocation" />
+          Salvar localização aproximada
+        </label>
+
+        <TaskLocationMap :location="location" />
+        <span class="location-precision-note">
+          {{ useApproximateLocation ? 'Localização aproximada' : 'Localização exata' }}
+        </span>
+
+        <button
+          type="button"
+          class="task-button-secondary danger"
+          @click="handleClearLocation"
+        >
+          Remover localização
+        </button>
+      </template>
+
       <span v-if="locationError" class="location-error">{{ locationError }}</span>
-      <button
-        v-if="latitude !== null && longitude !== null"
-        type="button"
-        class="task-button-secondary danger"
-        @click="clearLocation"
-      >
-        Remover localização
-      </button>
     </div>
 
     <div class="image-section">
@@ -139,9 +157,13 @@
 </template>
 
 <script setup>
-import { onMounted, ref, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import tasksApi from '../api/tasksApi.js';
+import geocodingApi from '../api/geocodingApi.js';
+import { useGeolocation } from '../composables/useGeolocation.js';
+import { classifyAccuracy, roundCoordinate } from '../utils/location.js';
 import CameraCapture from './CameraCapture.vue';
+import TaskLocationMap from './TaskLocationMap.vue';
 
 const props = defineProps({
   editingTask: {
@@ -161,15 +183,25 @@ const cameraMode = ref('environment');
 const hasCamera = ref(false);
 const showCameraCapture = ref(false);
 const uploadError = ref(null);
-const latitude = ref(null);
-const longitude = ref(null);
-const locating = ref(false);
-const locationError = ref(null);
+const useApproximateLocation = ref(false);
+const locationRemoved = ref(false);
 const isMobileDevice = ref(
   /Android|iPhone|iPad|iPod|webOS|BlackBerry|IEMobile|Opera Mini/i.test(
     navigator.userAgent,
   ),
 );
+
+const {
+  loadingLocation,
+  locationError,
+  location,
+  setLocationFromTask,
+  clearLocation,
+  setLocationLabel,
+  requestCurrentLocation,
+} = useGeolocation();
+
+const accuracyLevel = computed(() => classifyAccuracy(location.value?.accuracy));
 
 const MAX_SIZE_MB = 5;
 
@@ -183,9 +215,9 @@ watch(
     imgAttachmentKey.value = null;
     removeImage.value = false;
     uploadError.value = null;
-    latitude.value = null;
-    longitude.value = null;
-    locationError.value = null;
+    useApproximateLocation.value = false;
+    locationRemoved.value = false;
+    setLocationFromTask(task);
   },
   { immediate: true },
 );
@@ -194,36 +226,23 @@ onMounted(async () => {
   hasCamera.value = await checkCameraSupport();
 });
 
-function captureLocation() {
-  if (!('geolocation' in navigator)) {
-    locationError.value = 'Geolocalização não suportada neste navegador.';
-    return;
+async function handleGetLocation() {
+  const captured = await requestCurrentLocation();
+  if (!captured) return;
+  locationRemoved.value = false;
+
+  try {
+    const address = await geocodingApi.reverse(captured.latitude, captured.longitude);
+    setLocationLabel(address?.label);
+  } catch {
+    locationError.value =
+      'Localização obtida, mas não foi possível identificar a rua.';
   }
-  locating.value = true;
-  locationError.value = null;
-  navigator.geolocation.getCurrentPosition(
-    (position) => {
-      latitude.value = position.coords.latitude;
-      longitude.value = position.coords.longitude;
-      locating.value = false;
-    },
-    (err) => {
-      locating.value = false;
-      latitude.value = null;
-      longitude.value = null;
-      locationError.value =
-        err.code === err.PERMISSION_DENIED
-          ? 'Permissão de localização negada.'
-          : 'Não foi possível obter a localização.';
-    },
-    { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 },
-  );
 }
 
-function clearLocation() {
-  latitude.value = null;
-  longitude.value = null;
-  locationError.value = null;
+function handleClearLocation() {
+  clearLocation();
+  locationRemoved.value = true;
 }
 
 async function checkCameraSupport() {
@@ -253,7 +272,6 @@ async function handleImageChange(event) {
     return;
   }
 
-  captureLocation();
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
   previewUrl.value = URL.createObjectURL(file);
   removeImage.value = false;
@@ -263,7 +281,6 @@ async function handleImageChange(event) {
 async function handleCameraCapture(file) {
   if (!file) return;
   uploadError.value = null;
-  captureLocation();
   if (previewUrl.value) URL.revokeObjectURL(previewUrl.value);
   previewUrl.value = URL.createObjectURL(file);
   removeImage.value = false;
@@ -284,6 +301,16 @@ async function uploadImage(file) {
   }
 }
 
+function buildOutgoingLocation() {
+  if (!location.value) return null;
+  if (!useApproximateLocation.value) return location.value;
+  return {
+    ...location.value,
+    latitude: roundCoordinate(location.value.latitude),
+    longitude: roundCoordinate(location.value.longitude),
+  };
+}
+
 function handleSubmit() {
   if (!newTask.value.trim()) return;
 
@@ -292,8 +319,8 @@ function handleSubmit() {
     priority: priority.value,
     imgAttachmentKey: imgAttachmentKey.value,
     removeImage: removeImage.value,
-    latitude: latitude.value,
-    longitude: longitude.value,
+    location: buildOutgoingLocation(),
+    removeLocation: locationRemoved.value,
   };
 
   if (props.editingTask) {
@@ -313,9 +340,9 @@ function resetForm() {
   imgAttachmentKey.value = null;
   removeImage.value = false;
   uploadError.value = null;
-  latitude.value = null;
-  longitude.value = null;
-  locationError.value = null;
+  useApproximateLocation.value = false;
+  locationRemoved.value = false;
+  clearLocation();
 }
 
 function handleCancel() {
@@ -428,6 +455,47 @@ function handleCancel() {
 .location-error {
   font-size: 0.875rem;
   color: #c0392b;
+}
+
+.location-label {
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.accuracy-badge {
+  font-size: 0.75rem;
+  padding: 2px 8px;
+  border-radius: 12px;
+}
+
+.accuracy-badge--boa {
+  background: #d4edda;
+  color: #155724;
+}
+
+.accuracy-badge--moderada {
+  background: #fff3cd;
+  color: #856404;
+}
+
+.accuracy-badge--baixa {
+  background: #f8d7da;
+  color: #721c24;
+}
+
+.approximate-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.8rem;
+  color: #555;
+  cursor: pointer;
+}
+
+.location-precision-note {
+  font-size: 0.75rem;
+  color: #888;
+  flex-basis: 100%;
 }
 
 .image-section {

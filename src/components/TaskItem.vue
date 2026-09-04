@@ -24,7 +24,14 @@
         {{ priorityLabel }}
       </span>
       <span
-        v-if="task.latitude != null && task.longitude != null"
+        v-if="task.location_label"
+        class="task-location-tag"
+        :title="task.location_label"
+      >
+        📍 {{ task.location_label }}
+      </span>
+      <span
+        v-else-if="task.latitude != null && task.longitude != null"
         class="task-coordinates"
       >
         📍 {{ task.latitude.toFixed(4) }}, {{ task.longitude.toFixed(4) }}
@@ -32,11 +39,30 @@
     </label>
 
     <div class="task-actions">
+      <button
+        v-if="task.latitude != null && task.longitude != null"
+        class="task-map-toggle"
+        type="button"
+        @click="expanded = !expanded"
+      >
+        {{ expanded ? 'Ocultar mapa' : 'Ver mapa' }}
+      </button>
       <button class="task-edit" @click="$emit('edit', task)">Editar</button>
       <button class="task-remove" @click="$emit('remove', task.id)">
         Remover
       </button>
     </div>
+
+    <TaskLocationMap
+      v-if="expanded && task.latitude != null && task.longitude != null"
+      class="task-item-map"
+      :location="{
+        latitude: task.latitude,
+        longitude: task.longitude,
+        accuracy: task.geolocation_accuracy,
+        label: task.location_label,
+      }"
+    />
 
     <dialog ref="dialogRef" class="photo-dialog">
       <div class="photo-dialog-content">
@@ -51,6 +77,7 @@
 
 <script setup>
 import { computed, ref } from 'vue';
+import TaskLocationMap from './TaskLocationMap.vue';
 
 const props = defineProps({
   task: {
@@ -62,6 +89,7 @@ const props = defineProps({
 defineEmits(['toggle', 'remove', 'edit']);
 
 const dialogRef = ref(null);
+const expanded = ref(false);
 
 const priorityLabel = computed(() => {
   const labels = { baixa: 'Baixa', alta: 'Alta' };
@@ -80,6 +108,7 @@ function closeDialog() {
 <style scoped>
 .task-item {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   padding: 12px;
@@ -89,6 +118,32 @@ function closeDialog() {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: opacity 0.2s;
   gap: 10px;
+}
+
+.task-item-map {
+  flex-basis: 100%;
+}
+
+.task-location-tag {
+  font-size: 0.75rem;
+  color: #4a90d9;
+  flex-basis: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-map-toggle {
+  background: none;
+  border: none;
+  color: #4a90d9;
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 4px 8px;
+}
+
+.task-map-toggle:hover {
+  text-decoration: underline;
 }
 
 .task-thumbnail {

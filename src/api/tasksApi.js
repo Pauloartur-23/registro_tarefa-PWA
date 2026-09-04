@@ -5,11 +5,9 @@ const tasksApi = {
     return apiClient.get('/tasks');
   },
 
-  create(title, priority = 'normal', imgAttachmentKey = null, latitude = null, longitude = null) {
-    const data = { title, priority };
+  create(title, priority = 'normal', imgAttachmentKey = null, locationPayload = null) {
+    const data = { title, priority, ...locationPayload };
     if (imgAttachmentKey) data.img_attachment_key = imgAttachmentKey;
-    if (latitude != null) data.latitude = latitude;
-    if (longitude != null) data.longitude = longitude;
     return apiClient.post('/tasks', data);
   },
 

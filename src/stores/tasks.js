@@ -1,12 +1,14 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import tasksApi from '../api/tasksApi.js';
+import { buildLocationPayload } from '../utils/location.js';
 
 export const useTasksStore = defineStore('tasks', () => {
   const tasks = ref([]);
   const loading = ref(false);
   const error = ref(null);
   const filterText = ref('');
+  const onlyWithLocation = ref(false);
 
   const pendingTasks = computed(() => tasks.value.filter((t) => !t.done));
   const completedTasks = computed(() => tasks.value.filter((t) => t.done));
@@ -16,8 +18,9 @@ export const useTasksStore = defineStore('tasks', () => {
 
   const filteredTasks = computed(() => {
     const term = filterText.value.trim().toLowerCase();
-    if (!term) return tasks.value;
     return tasks.value.filter((t) => {
+      if (onlyWithLocation.value && t.latitude == null) return false;
+      if (!term) return true;
       const priority = t.priority || 'normal';
       const priorityLabel = priorityLabels[priority] ?? priority;
       return (
@@ -68,18 +71,17 @@ export const useTasksStore = defineStore('tasks', () => {
     title,
     priority = 'normal',
     imgAttachmentKey,
-    latitude,
-    longitude,
+    location,
   } = {}) {
     if (!title?.trim()) return;
     error.value = null;
     try {
+      const locationPayload = buildLocationPayload(location);
       const response = await tasksApi.create(
         title.trim(),
         priority,
         imgAttachmentKey,
-        latitude,
-        longitude,
+        locationPayload,
       );
       tasks.value.push(response.data);
     } catch (err) {
@@ -115,7 +117,14 @@ export const useTasksStore = defineStore('tasks', () => {
 
   async function updateTask(
     id,
-    { title, imgAttachmentKey, removeImage = false, priority, latitude, longitude } = {},
+    {
+      title,
+      imgAttachmentKey,
+      removeImage = false,
+      priority,
+      location,
+      removeLocation = false,
+    } = {},
   ) {
     if (title !== undefined && !title.trim()) return;
     error.value = null;
@@ -127,8 +136,11 @@ export const useTasksStore = defineStore('tasks', () => {
       payload.img_attachment_key = imgAttachmentKey;
     }
     if (priority !== undefined) payload.priority = priority;
-    if (latitude != null) payload.latitude = latitude;
-    if (longitude != null) payload.longitude = longitude;
+    if (removeLocation) {
+      Object.assign(payload, buildLocationPayload(null));
+    } else if (location) {
+      Object.assign(payload, buildLocationPayload(location));
+    }
     try {
       const response = await tasksApi.update(id, payload);
       const index = tasks.value.findIndex((t) => t.id === id);
@@ -144,6 +156,7 @@ export const useTasksStore = defineStore('tasks', () => {
     loading,
     error,
     filterText,
+    onlyWithLocation,
     pendingTasks,
     completedTasks,
     filteredTasks,

@@ -17,6 +17,11 @@
         placeholder="Buscar tarefas..."
       />
 
+      <label class="location-filter">
+        <input type="checkbox" v-model="store.onlyWithLocation" />
+        Somente com localização
+      </label>
+
       <section v-if="store.filteredPendingTasks.length > 0">
         <h2 class="section-title">
           Pendentes ({{ store.filteredPendingTasks.length }})
@@ -164,6 +169,16 @@ function handleRemove(id) {
 
 .search-input:focus {
   border-color: #4a90d9;
+}
+
+.location-filter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #666;
+  cursor: pointer;
+  margin-bottom: 12px;
 }
 
 .loading-message {
